@@ -119,8 +119,21 @@ modded class ItemBase
                 // which is why a weapon magazine never divides.
                 if (CanBeSplit())
                 {
+                    // THE SAME PARENT FIRST, as vanilla's own rule has it
+                    // (itembase.c:2124): a stack lying in a bag hung in the
+                    // box splits into that bag while it has room, and into
+                    // the box's own grid otherwise. Asked of the proxy's
+                    // container, which has the authority's grid.
+                    EntityAI holder = m.m_Box;
+                    EntityAI parent = GetHierarchyParent();
+                    if (parent && parent != m.m_Box && parent.GetInventory())
+                    {
+                        InventoryLocation room = new InventoryLocation();
+                        if (parent.GetInventory().FindFreeLocationFor(this, FindInventoryLocationType.CARGO, room))
+                            holder = parent;
+                    }
                     OZS_Mirrors.s_Via = "OnRightClick";
-                    m.Split(this, m.m_Box, OZS_Const.SPLIT_HALF, InventoryLocationType.CARGO, -1, -1, -1, 0);
+                    m.Split(this, holder, OZS_Const.SPLIT_HALF, InventoryLocationType.CARGO, -1, -1, -1, 0);
                 }
                 // Vanilla's message is not sent for a box item either way:
                 // there is nothing in it the server could resolve.

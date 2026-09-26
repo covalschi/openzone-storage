@@ -879,12 +879,25 @@ class OZS_Session
         Tell(OZS_Const.CH_GONE, r, by);
     }
 
+    // THE TWO NUMBERS ARE LOOKED UP INTO LOCALS FIRST, NEVER IN THE ARGUMENT
+    // LIST. `Describe(e, Handle(e), ParentHandle(e), r)` reached the client
+    // with the PARENT's number in the handle field for every nested item:
+    // ParentHandle calls Handle again, and the engine hands the second call's
+    // result back in the slot of the first (measured 2026-09-26: a rag moved
+    // into a bag hung in a stash was told as "#1 Rag" -- #1 being the bag --
+    // while the server's own table said #2; a quantity change on it landed
+    // on the bag; a stack split off it made the client delete the bag).
+    // Snapshot and TellTree never had the fault because they computed the
+    // parent's number into a local before the call.
     void TellMoved(EntityAI e, string by = "")
     {
         if (!e || !m_Auth)
             return;
         OZS_Row r = new OZS_Row();
-        Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r);
+        int movedHandle = OZS_Authority.Handle(m_Auth, e);
+        int movedParent = ParentHandle(e);
+        Describe(e, movedHandle, movedParent, r);
+        OZ_Log.Dbg("storage: proxy: telling moved #" + r.handle.ToString() + " " + r.cls + " in #" + r.parent.ToString() + " to " + r.Where());
         Tell(OZS_Const.CH_MOVED, r, by);
     }
 
@@ -893,7 +906,9 @@ class OZS_Session
         if (!e || !m_Auth)
             return;
         OZS_Row r = new OZS_Row();
-        Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r);
+        int qtyHandle = OZS_Authority.Handle(m_Auth, e);
+        int qtyParent = ParentHandle(e);
+        Describe(e, qtyHandle, qtyParent, r);
         Tell(OZS_Const.CH_QTY, r, by);
     }
 
@@ -902,7 +917,9 @@ class OZS_Session
         if (!e || !m_Auth)
             return;
         OZS_Row r = new OZS_Row();
-        Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r);
+        int addedHandle = OZS_Authority.Handle(m_Auth, e);
+        int addedParent = ParentHandle(e);
+        Describe(e, addedHandle, addedParent, r);
         Tell(OZS_Const.CH_ADDED, r, by);
     }
 

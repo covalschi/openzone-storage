@@ -707,3 +707,58 @@ restream every time; and the owner's "six rags again" -- a stack split in
 a box that shows its whole pre-split count once taken back into the
 inventory -- did not leave a trace in either log.
 
+### The three open items, reproduced by the probe and fixed
+
+The stand was wiped and rebuilt; the probe client got `pxsplit`, `pxmove
+... [into]` and `inv`, the stand verb got `auth do=peek` with every gate a
+split asks, `auth do=tree` with the whole handle table, and `clean` (the
+player's stack marked disinfected, which in vanilla is cleanness 1,
+disinfectitem.c:89). Each item was replayed, the cause read off both logs,
+fixed, rebuilt and replayed again.
+
+**A nested item was told to the client under its container's handle.** A
+rag moved into a bag hung in the stash was logged by the server as `move #2
+Rag to 0,0 of MountainBag_Red` and by the client as `told #1 Rag to 0,0`,
+#1 being the bag; the client then moved the bag into itself, read it at
+`-1,-1` and asked for the whole box again. A quantity change on the nested
+rag landed on the bag, and a stack split off it made the client forget the
+bag, with everything in it. The server's own table was right the whole
+time (`auth do=tree`: `#2 Rag in #1`). The fault was one line, three
+times: `Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r)`.
+ParentHandle calls Handle again, and THE ENGINE HANDS THE SECOND CALL'S
+RESULT BACK IN THE FIRST ARGUMENT'S SLOT. For a root item ParentHandle
+returns 0 before calling anything, which is why root items were always
+right, and the full stream (Snapshot, TellTree, both with the parent's
+number in a local) never showed it. TellMoved, TellQuantity and TellAdded
+now look both numbers up into locals before the call. Replayed: `telling
+moved #2 Rag in #1 to 1,0` on the server, `told #2 Rag to 1,0` on the
+client, no warning, no restream; a split of a stack inside the bag leaves
+the bag standing with the source at its new count and the new stack drawn
+where the server put it. Recorded in the skill as an engine rule.
+
+**Splits inside a slot-hung container.** Every gate the split asks is open
+there (`peek`: `CanBeSplit true CanRemoveEntity true
+LocationCanRemoveEntity true parentReleasesCargo true`), and the server
+split the nested stack every time. What the owner saw as refusals was the
+same handle fault: the client asked to split the number it had been given,
+which was the container's or a stack of one. The right-click split now
+also follows vanilla's own rule for WHERE the new stack goes
+(itembase.c:2124): the item's own container while it has room, the box's
+grid otherwise.
+
+**"Six rags again".** Replayed exactly: a disinfected stack of six into a
+box, split, a dirty rag stacked onto the secondary, the secondary split,
+the primary taken out. The primary appeared in the shirt as `qty 6/6
+clean 1` while the server held `qty 3 cleanness 1`. No duplicate: the
+client's COPY was wrong. `RemoteObjectTreeCreate` announces an entity the
+network had forgotten, and the copy a client builds starts from the config;
+the quantity arrived only with the next synchronised change (a cleanness
+change on the server redrew it as three at once). A stack that had never
+left the box before showed the right number, its change was still unsent,
+which is why the plain split-and-take-out never reproduced it.
+`OZS_Ops.Announce` now marks every entity of the announced tree dirty
+right after the announcement, and the next frame's sync carries quantity,
+wet and cleanness to the copies just made; the three places that announced
+(the take-out, the refused put-in, the restore of a returned root) go
+through it.
+

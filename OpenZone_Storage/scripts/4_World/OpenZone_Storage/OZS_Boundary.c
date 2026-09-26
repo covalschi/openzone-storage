@@ -159,7 +159,7 @@ class OZS_Boundary
             w.No(handle, "#STR_OZS_NO_ROOM", s.m_Version);
             return;
         }
-        GetGame().RemoteObjectTreeCreate(e);
+        OZS_Ops.Announce(e);
         OZS_Authority.Forget(s.m_Auth);
         s.Touch();
         s.TellGone(handle, w.m_Uid);
@@ -462,7 +462,7 @@ class OZS_Boundary
         // THEM into the box's record as a root (owner, 2026-09-24).
         if (!moved || !OZS_Commit.TopOf(s, e))
         {
-            GetGame().RemoteObjectTreeCreate(e);
+            OZS_Ops.Announce(e);
             OZ_Log.Error("storage: proxy: box " + s.m_Id + " did not take " + e.GetType() + " (the move said " + moved.ToString() + "); it is announced again where it was");
             w.No(0, "the box refused it", s.m_Version);
             return;

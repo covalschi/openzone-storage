@@ -180,6 +180,13 @@ class OZS_Authority
         rec.m_Handles.Insert(rec.m_Next);
         rec.m_ByHandle.Set(rec.m_Next, item);
         OZS_HandleTag.Write(item, rec.m_Next);
+        // WHO GOT A NEW NUMBER, AND WHY THE OLD ONE DID NOT DO. A number
+        // handed out twice for one entity is a client told about an item
+        // under a name it does not know (2026-09-26, "told #1 Rag").
+        string mapHad = "nothing";
+        if (has > 0 && rec.m_ByHandle.Get(has))
+            mapHad = rec.m_ByHandle.Get(has).GetType();
+        OZ_Log.Dbg("storage: handle #" + rec.m_Next.ToString() + " given to " + item.GetType() + " in " + rec.m_For + " (its tag said " + has.ToString() + ", the table had " + mapHad + " there)");
         return rec.m_Next;
     }
 

@@ -37,6 +37,13 @@
 //                            the box's; gstackout the other way round
 //     gswap <cls> <handle> [n] -- a loose <cls> dropped onto the box item with
 //                          that handle, routed as the screen would route it
+//     pxsplit <handle> [here] [n] -- the right-click split of that box item,
+//                          exactly the call OnRightClick makes; `here` names
+//                          the item's own container as the holder instead
+//     pxmove <id> <handle> <row> <col> [into] -- a move inside the box, into
+//                          the box's own grid or into the container <into>
+//     inv [n]         -- the player's inventory and every proxy's items with
+//                        their quantities, into scan.txt
 #ifndef NO_GUI
 class OZ_ProbeClientControl
 {
@@ -193,8 +200,18 @@ class OZ_ProbeClientControl
         }
         else if (line.IndexOf("pxmove ") == 0)
         {
-            // pxmove <id> <handle> <row> <col>
+            // pxmove <id> <handle> <row> <col> [into]
             PxMove(line);
+        }
+        else if (line.IndexOf("pxsplit ") == 0)
+        {
+            // pxsplit <handle> [here] [n] -- the right-click split by hand
+            PxSplit(line);
+        }
+        else if (line == "inv" || line.IndexOf("inv ") == 0)
+        {
+            // inv [n] -- the player's inventory and every proxy, with counts
+            Inv();
         }
         else if (line.IndexOf("px") == 0)
         {
@@ -854,17 +871,120 @@ class OZ_ProbeClientControl
         int handle = parts.Get(2).ToInt();
         int row = parts.Get(3).ToInt();
         int col = parts.Get(4).ToInt();
+        int into = 0;
+        if (parts.Count() > 5)
+            into = parts.Get(5).ToInt();
         EntityAI e = m.ByHandle(handle);
         if (!e)
         {
             Note("pxmove: no handle " + handle.ToString());
             return;
         }
+        if (into != 0 && !m.ByHandle(into))
+        {
+            Note("pxmove: no container with handle " + into.ToString());
+            return;
+        }
         OZS_Row want = new OZS_Row();
-        want.Set(handle, 0, InventoryLocationType.CARGO, -1, row, col, 0, e.GetType());
+        want.Set(handle, into, InventoryLocationType.CARGO, -1, row, col, 0, e.GetType());
         bool here = m.Place(e, want);
-        m.Move(handle, 0, InventoryLocationType.CARGO, -1, row, col, 0);
-        Note("pxmove #" + handle.ToString() + " to " + row.ToString() + "," + col.ToString() + ": the proxy said " + here.ToString() + ", the server was asked");
+        m.Move(handle, into, InventoryLocationType.CARGO, -1, row, col, 0);
+        Note("pxmove #" + handle.ToString() + " to " + row.ToString() + "," + col.ToString() + " of #" + into.ToString() + ": the proxy said " + here.ToString() + ", the server was asked");
+    }
+
+    // The right-click split, by hand: the same call OZS_Stacking's
+    // OnRightClick makes, after the same CanBeSplit question -- asked of the
+    // PROXY item, which is what the screen asks too.
+    protected void PxSplit(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!m || parts.Count() < 2)
+        {
+            Note("=== " + line + ": no box open, or no handle");
+            return;
+        }
+        int handle = parts.Get(1).ToInt();
+        EntityAI e = m.ByHandle(handle);
+        ItemBase ib = ItemBase.Cast(e);
+        if (!ib)
+        {
+            Note("=== " + line + ": no such handle");
+            return;
+        }
+        EntityAI holder = m.m_Box;
+        if (parts.Count() > 2 && parts.Get(2) == "here" && e.GetHierarchyParent())
+            holder = e.GetHierarchyParent();
+        string told = "=== " + line + ": #" + handle.ToString() + " " + e.GetType() + " qty " + ib.GetQuantity().ToString();
+        told = told + " splitable " + ib.IsSplitable().ToString() + " CanBeSplit " + ib.CanBeSplit().ToString();
+        told = told + " CanRemoveEntity " + ib.GetInventory().CanRemoveEntity().ToString();
+        if (!ib.CanBeSplit())
+            Note(told + " -> the screen would not offer the split; sending anyway");
+        OZS_Mirrors.s_Via = "pxsplit";
+        m.Split(e, holder, OZS_Const.SPLIT_HALF, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        Note(told + " -> Split sent, holder " + holder.GetType());
+    }
+
+    // Both sides' counts: what the player carries and what every proxy holds,
+    // handle by handle.
+    protected void Inv()
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+        {
+            Note("=== inv: no player");
+            return;
+        }
+        Note("=== inv: the player");
+        EntityAI held = me.GetHumanInventory().GetEntityInHands();
+        if (held)
+            Note("  hands " + Counted(held));
+        array<EntityAI> all = new array<EntityAI>();
+        me.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, all);
+        for (int i = 0; i < all.Count(); i++)
+        {
+            EntityAI e = all.Get(i);
+            if (!e || e == me || e == held)
+                continue;
+            Note("  " + Counted(e));
+        }
+        array<ref OZS_Mirror> mirrors = OZS_Mirrors.Get().All();
+        for (int k = 0; k < mirrors.Count(); k++)
+        {
+            OZS_Mirror m = mirrors.Get(k);
+            Note("=== inv: proxy " + m.m_Id + " " + m.m_Items.Count().ToString() + " item(s)");
+            for (int j = 0; j < m.m_Items.Count(); j++)
+            {
+                EntityAI p = m.m_Items.Get(j);
+                if (!p)
+                    continue;
+                Note("  #" + m.m_Handles.Get(j).ToString() + " " + Counted(p));
+            }
+        }
+    }
+
+    protected string Counted(EntityAI e)
+    {
+        string s = e.GetType();
+        ItemBase ib = ItemBase.Cast(e);
+        if (ib && ib.HasQuantity())
+            s = s + " qty " + ib.GetQuantity().ToString() + "/" + ib.GetQuantityMax().ToString();
+        Magazine mag = Magazine.Cast(e);
+        if (mag)
+            s = s + " ammo " + mag.GetAmmoCount().ToString();
+        if (ib)
+            s = s + " clean " + ib.GetCleanness().ToString();
+        InventoryLocation il = new InventoryLocation();
+        if (e.GetInventory() && e.GetInventory().GetCurrentInventoryLocation(il))
+        {
+            string where = "lt " + il.GetType().ToString() + " " + il.GetRow().ToString() + "," + il.GetCol().ToString();
+            if (il.GetParent())
+                where = where + " in " + il.GetParent().GetType();
+            s = s + " (" + where + ")";
+        }
+        s = s + " netid " + e.GetNetworkIDString();
+        return s;
     }
 
     // The proxy's contents as this client sees them, so the two sides can be

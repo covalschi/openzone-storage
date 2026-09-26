@@ -654,7 +654,7 @@ class OZS_Records
                 continue;
             }
             if (m.publish || !placed)
-                GetGame().RemoteObjectTreeCreate(m.item);
+                OZS_Ops.Announce(m.item);
         }
         moves.Clear();
         return failed;

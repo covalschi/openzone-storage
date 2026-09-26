@@ -5,6 +5,7 @@
 //   world_exec verb=oz_storage args={"op":"status","id":"<box id>"}      (or pos, or nearest to the player)
 //   world_exec verb=oz_storage args={"op":"files","id":"<box id>"}
 //   world_exec verb=oz_storage args={"op":"tune","ping":"100","wait":"1"}                    (stand: settings at runtime)
+//   world_exec verb=oz_storage args={"op":"clean","cls":"Rag","value":"1"}                   (stand: mark the player's stack disinfected)
 //   world_exec verb=oz_storage args={"op":"probe","class":"OZ_PersonalStash","slot":"Body"}          (stand measurement)
 //   world_exec verb=oz_storage args={"op":"auth","do":"make","id":"<box id>"}                 (stand: the authoritative box, design 2026-09-24)
 //   world_exec verb=oz_storage args={"op":"proxy","do":"open","id":"<box id>"}                (stand: a proxy session, design 2026-09-24)
@@ -109,6 +110,37 @@ modded class DZMCP_BridgeCore
             detail = detail + " release=" + st.ReleaseDeletesPerFrame + "/frame";
             detail = detail + " ping=" + st.FakePingMs + "ms wait_for_record=" + st.WaitForRecord;
             return true;
+        }
+
+        if (op == "clean")
+        {
+            // STAND ONLY: the player's first <cls> is marked disinfected
+            // (value=1) or dirty (0), the way ActionDisinfect would, so a
+            // report about a disinfected stack can be replayed without the
+            // spray and the gesture (2026-09-26).
+            array<Man> cleanMen = new array<Man>();
+            GetGame().GetPlayers(cleanMen);
+            if (cleanMen.Count() == 0)
+            {
+                detail = "clean needs a player";
+                return false;
+            }
+            PlayerBase cleanMe = PlayerBase.Cast(cleanMen.Get(0));
+            string ccls = OZS_Arg(args, "cls", "Rag");
+            int cval = OZS_Arg(args, "value", "1").ToInt();
+            array<EntityAI> cleanCarried = new array<EntityAI>();
+            cleanMe.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, cleanCarried);
+            for (int cleanIdx = 0; cleanIdx < cleanCarried.Count(); cleanIdx++)
+            {
+                ItemBase cleanItem = ItemBase.Cast(cleanCarried.Get(cleanIdx));
+                if (!cleanItem || cleanItem == cleanMe || !cleanItem.IsKindOf(ccls))
+                    continue;
+                cleanItem.SetCleanness(cval);
+                detail = cleanItem.GetType() + " qty " + cleanItem.GetQuantity().ToString() + " cleanness " + cleanItem.GetCleanness().ToString() + " netid " + cleanItem.GetNetworkIDString();
+                return true;
+            }
+            detail = "no " + ccls + " on the player";
+            return false;
         }
 
         if (op == "spawn")
@@ -975,7 +1007,8 @@ modded class DZMCP_BridgeCore
             //   do=make   id=<box id> [class=<cls>] [pos="x y z"]
             //   do=open   id=<box id>       fill it from SQL by the ordinary open
             //   do=index  id=<box id>       a handle for every entity in it
-            //   do=peek   id=<box id> [handle=N]
+            //   do=peek   id=<box id> [handle=N]   with every gate a split asks
+            //   do=tree   id=<box id>       the whole handle table with quantities
             //   do=discard id=<box id>      delete it, write nothing
             //   do=status                   every live authority
             string what = OZS_Arg(args, "do", "status");
@@ -1084,6 +1117,58 @@ modded class DZMCP_BridgeCore
                 }
                 detail = "#" + handle.ToString() + " " + got.GetType() + " netid " + got.GetNetworkIDString();
                 detail = detail + " tree " + OZS_Records.CountTree(got).ToString();
+                // EVERY GATE A SPLIT ASKS, named one by one (2026-09-26: a
+                // stack inside a container hung in a stash's slot was refused
+                // #STR_OZS_NO_SPLIT and nothing said by whom).
+                ItemBase pib = ItemBase.Cast(got);
+                if (pib)
+                {
+                    detail = detail + " qty " + pib.GetQuantity().ToString() + " splitable " + pib.IsSplitable().ToString();
+                    detail = detail + " CanBeSplit " + pib.CanBeSplit().ToString();
+                    detail = detail + " CanRemoveEntity " + pib.GetInventory().CanRemoveEntity().ToString();
+                    InventoryLocation pil = new InventoryLocation();
+                    if (pib.GetInventory().GetCurrentInventoryLocation(pil))
+                    {
+                        detail = detail + " lt " + pil.GetType().ToString() + " at " + pil.GetRow().ToString() + "," + pil.GetCol().ToString();
+                        detail = detail + " LocationCanRemoveEntity " + GameInventory.LocationCanRemoveEntity(pil).ToString();
+                        EntityAI pparent = pil.GetParent();
+                        if (pparent)
+                        {
+                            detail = detail + " parent " + pparent.GetType() + " #" + OZS_Authority.Handle(auth, pparent).ToString();
+                            detail = detail + " parentReleasesCargo " + pparent.CanReleaseCargo(got).ToString();
+                            detail = detail + " parentCanRemoveInCargo " + pparent.GetInventory().CanRemoveEntityInCargo(got).ToString();
+                            detail = detail + " parentRuined " + pparent.IsRuined().ToString();
+                            detail = detail + " parentChildrenAccessible " + pparent.AreChildrenAccessible().ToString();
+                        }
+                    }
+                }
+                return true;
+            }
+            if (what == "tree")
+            {
+                // The whole handle table of the authority, as the server holds
+                // it: what the client's own table is diffed against.
+                array<EntityAI> tnodes = new array<EntityAI>();
+                array<int> tparents = new array<int>();
+                OZS_Records.Flatten(auth, -1, tnodes, tparents);
+                detail = "authority of " + aid + ": " + (tnodes.Count() - 1).ToString() + " entity(ies)";
+                for (int ti = 1; ti < tnodes.Count(); ti++)
+                {
+                    EntityAI tn = tnodes.Get(ti);
+                    if (!tn)
+                        continue;
+                    int tph = 0;
+                    if (tparents.Get(ti) > 0)
+                        tph = OZS_Authority.Handle(auth, tnodes.Get(tparents.Get(ti)));
+                    string trow = " | #" + OZS_Authority.Handle(auth, tn).ToString() + " " + tn.GetType() + " in #" + tph.ToString();
+                    ItemBase tib = ItemBase.Cast(tn);
+                    if (tib && tib.HasQuantity())
+                        trow = trow + " qty " + tib.GetQuantity().ToString();
+                    InventoryLocation til = new InventoryLocation();
+                    if (tn.GetInventory().GetCurrentInventoryLocation(til))
+                        trow = trow + " lt " + til.GetType().ToString() + " " + til.GetRow().ToString() + "," + til.GetCol().ToString();
+                    detail = detail + trow;
+                }
                 return true;
             }
             if (what == "discard")

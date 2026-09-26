@@ -1576,6 +1576,31 @@ class OZS_Ops
 
     // A move, and then the question "did it actually move". Nothing here
     // trusts TakeToDst's return value; the item is asked where it is.
+    // TOLD TO THE CLIENTS, AND THEN TOLD WHAT IT HOLDS. `RemoteObjectTreeCreate`
+    // announces an entity the network had forgotten, and the copy a client
+    // builds for it starts from the CONFIG: a stack split from six to three
+    // inside the box came back into the player's shirt drawn as six, while
+    // the server held three, and stayed six until the next change of any
+    // synchronised variable brought the number along (measured 2026-09-26:
+    // the owner's "six rags again"; a change of cleanness on the server
+    // redrew it as three). So every entity of the announced tree is marked
+    // dirty right after, and the next frame's sync carries quantity, wet,
+    // cleanness and the rest to the copies just made.
+    static void Announce(EntityAI e)
+    {
+        if (!e)
+            return;
+        GetGame().RemoteObjectTreeCreate(e);
+        array<EntityAI> nodes = new array<EntityAI>();
+        array<int> parents = new array<int>();
+        OZS_Records.Flatten(e, -1, nodes, parents);
+        for (int i = 0; i < nodes.Count(); i++)
+        {
+            if (nodes.Get(i))
+                nodes.Get(i).SetSynchDirty();
+        }
+    }
+
     static bool Put(EntityAI e, InventoryLocation dst)
     {
         if (!e || !e.GetInventory())
